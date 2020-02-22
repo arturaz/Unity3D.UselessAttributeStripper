@@ -1,104 +1,93 @@
 ﻿using System;
-using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
 using Mono.Cecil;
-using Mono.Collections.Generic;
 
-namespace UselessAttributeStripper
-{
-    public class AttributeStripper
-    {
-        private readonly string[] _attributeNames;
-        private readonly Dictionary<string, int> _stripCountMap;
-        private readonly Dictionary<string, int> _stripTotalCountMap;
+namespace UselessAttributeStripper {
+  public class AttributeStripper {
+    readonly Regex[] _attributeRegexes;
 
-        public Dictionary<string, int> StripCountMap { get { return _stripCountMap; } }
-        public Dictionary<string, int> StripTotalCountMap { get { return _stripTotalCountMap; } }
+    public readonly Dictionary<string, int> StripTotalCountMap = new Dictionary<string, int>();
 
-        public AttributeStripper(string[] attributeNames)
-        {
-            _attributeNames = attributeNames;
-            _stripCountMap = new Dictionary<string, int>();
-            _stripTotalCountMap = new Dictionary<string, int>();
-        }
-
-        public void ProcessDll(string dllPath)
-        {
-            _stripCountMap.Clear();
-
-            AssemblyDefinition assemblyDef;
-
-            using (var assemblyStream = new MemoryStream(File.ReadAllBytes(dllPath)))
-            {
-                assemblyDef = AssemblyDefinition.ReadAssembly(assemblyStream);
-            }
-
-            ProcessAssembly(new[] { assemblyDef });
-
-            using (var assemblyStream = File.Create(dllPath))
-            {
-                assemblyDef.Write(assemblyStream);
-            }
-        }
-
-        private void ProcessAssembly(AssemblyDefinition[] assemblyDefs)
-        {
-            foreach (var assemblyDef in assemblyDefs)
-            {
-                foreach (var moduleDef in assemblyDef.Modules)
-                {
-                    foreach (var type in moduleDef.Types)
-                        RemoveAttributes(type);
-                }
-            }
-        }
-
-        private void RemoveAttributes(TypeDefinition typeDef)
-        {
-            RemoveAttributes(typeDef.FullName, typeDef.CustomAttributes);
-
-            foreach (var field in typeDef.Fields)
-                RemoveAttributes(field.Name, field.CustomAttributes);
-
-            foreach (var property in typeDef.Properties)
-                RemoveAttributes(property.Name, property.CustomAttributes);
-
-            foreach (var method in typeDef.Methods)
-                RemoveAttributes(method.Name, method.CustomAttributes);
-
-            foreach (var type in typeDef.NestedTypes)
-                RemoveAttributes(type);
-        }
-
-        private void RemoveAttributes(string ownerName, Collection<CustomAttribute> customAttributes)
-        {
-            foreach (var attrName in _attributeNames)
-            {
-                var index = -1;
-                for (var i = 0; i < customAttributes.Count; i++)
-                {
-                    var attr = customAttributes[i];
-                    if (attr.Constructor != null && attr.Constructor.DeclaringType.FullName == attrName)
-                    {
-                        index = i;
-                        break;
-                    }
-                }
-
-                if (index != -1)
-                {
-                    customAttributes.RemoveAt(index);
-
-                    var count = 0;
-                    _stripCountMap.TryGetValue(attrName, out count);
-                    _stripCountMap[attrName] = count + 1;
-
-                    var totalCount = 0;
-                    _stripTotalCountMap.TryGetValue(attrName, out totalCount);
-                    _stripTotalCountMap[attrName] = totalCount + 1;
-                }
-            }
-        }
+    public AttributeStripper(Regex[] attributeRegexes) {
+      _attributeRegexes = attributeRegexes;
     }
+
+    public Dictionary<string, int> ProcessDll(string dllPath, IAssemblyResolver assemblyResolver) {
+      var stripCountMap = new Dictionary<string, int>();
+
+      try {
+        var assemblyBytes = File.ReadAllBytes(dllPath);
+        using var assemblyReadStream = new MemoryStream(assemblyBytes);
+        using var assemblyDef = AssemblyDefinition.ReadAssembly(
+          assemblyReadStream, new ReaderParameters {AssemblyResolver = assemblyResolver}
+        );
+        ProcessAssembly(new[] {assemblyDef}, stripCountMap);
+
+        if (stripCountMap.Count != 0) {
+          using var assemblyWriteStream = new MemoryStream();
+          assemblyDef.Write(assemblyWriteStream);
+          File.WriteAllBytes(dllPath, assemblyWriteStream.GetBuffer());
+        }
+
+        return stripCountMap;
+      }
+      catch (AssemblyResolutionException e) {
+        throw new Exception($"Failed to process {dllPath}, you need to pass -d argument to include DLLs", e);
+      }
+    }
+
+    void ProcessAssembly(AssemblyDefinition[] assemblyDefs, Dictionary<string, int> stripCountMap) {
+      foreach (var assemblyDef in assemblyDefs) {
+        foreach (var moduleDef in assemblyDef.Modules) {
+          foreach (var type in moduleDef.Types)
+            RemoveAttributes(type, stripCountMap);
+        }
+      }
+    }
+
+    void RemoveAttributes(TypeDefinition typeDef, Dictionary<string, int> stripCountMap) {
+      RemoveAttributes(typeDef.FullName, typeDef.CustomAttributes, stripCountMap);
+
+      foreach (var field in typeDef.Fields)
+        RemoveAttributes(field.Name, field.CustomAttributes, stripCountMap);
+
+      foreach (var property in typeDef.Properties)
+        RemoveAttributes(property.Name, property.CustomAttributes, stripCountMap);
+
+      foreach (var method in typeDef.Methods)
+        RemoveAttributes(method.Name, method.CustomAttributes, stripCountMap);
+
+      foreach (var type in typeDef.NestedTypes)
+        RemoveAttributes(type, stripCountMap);
+    }
+
+    void RemoveAttributes(
+      string ownerName, IList<CustomAttribute> customAttributes, Dictionary<string, int> stripCountMap
+    ) {
+      foreach (var attrRegex in _attributeRegexes) {
+        var idx = 0;
+        while (idx < customAttributes.Count) {
+          var attr = customAttributes[idx];
+          var attrName = attr.Constructor.DeclaringType.FullName;
+          if (attr.Constructor != null && attrRegex.IsMatch(attrName)) {
+            customAttributes.RemoveAt(idx);
+
+            stripCountMap.TryGetValue(attrName, out var count);
+            stripCountMap[attrName] = count + 1;
+
+            lock (StripTotalCountMap) {
+              StripTotalCountMap.TryGetValue(attrName, out var totalCount);
+              StripTotalCountMap[attrName] = totalCount + 1;
+            }
+          }
+          else {
+            idx++;
+          }
+        }
+      }
+    }
+  }
 }

@@ -1,0 +1,30 @@
+<strip-attribute>
+    <type regex="^System\.Runtime\.CompilerServices\.CompilerGeneratedAttribute$" />
+    <type regex="^System\.ParamArrayAttribute$" />
+    <type regex="^System\.Reflection\.DefaultMemberAttribute$" />
+    <type regex="^System\.Diagnostics\.DebuggerStepThroughAttribute$" />
+    <type regex="^System\.Diagnostics\.DebuggerHiddenAttribute$" />
+    <type regex="^System\.Diagnostics\.DebuggerDisplayAttribute$" />
+    <type regex="^System\.Diagnostics\.CodeAnalysis\.SuppressMessageAttribute$" />
+    <type regex="^System\.ObsoleteAttribute$" />
+    <type regex="^System\.AttributeUsageAttribute$" />
+    <type regex="^System\.MonoTODOAttribute$" />
+    <!-- Not relative -->
+    <type regex="^System\.CLSCompliantAttribute$" />
+    <type regex="^System\.Runtime\.InteropServices\.ComVisibleAttribute$" />
+    <type regex="^System\.Runtime\.ConstrainedExecution\.ReliabilityContractAttribute$" />
+    <!-- Editor only -->
+    <type regex="^UnityEngine\.AddComponentMenu$" />
+    <type regex="^UnityEditor\.MenuItem$" />
+    <type regex="^UnityEngine\.ContextMenu$" />
+    <type regex="^UnityEngine\.ExecuteInEditMode$" />
+    <type regex="^UnityEngine\.HideInInspector$" />
+    <type regex="^UnityEngine\.TooltipAttribute$" />
+    <type regex="^UnityEngine\.DisallowMultipleComponent$" />
+    <type regex="^UnityEngine\.Internal\.ExcludeFromDocsAttribute$" />
+    <!-- JetBrains stuff -->
+    <type regex="^JetBrains\.Annotations\..+$" />    
+		<!-- Common unity plugins -->
+    <type regex="^Sirenix\.OdinInspector\.Attributes\..+$" />
+    <type regex="^AdvancedInspector\..+Attribute$" />
+</strip-attribute>

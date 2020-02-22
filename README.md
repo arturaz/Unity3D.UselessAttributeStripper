@@ -21,71 +21,84 @@ will be encrypted before compression, this size really mattered.
 
 ### Setup
 
-Unzip [a release zip file](https://github.com/SaladbowlCreative/Unity3D.UselessAttributeStripper/releases) and run setup.py.
-- Run setup.py with administrative privilege because it may update your application directory.
-- If you didn't install Unity3D to default directory, you need to check your unity3d installation path.
+Read the source. Build from source. Run manually. Enjoy.
 
-For OSX
-```sh
-# if unity3d was installed to default directory
-sudo python setup.py install    
+Example for Unity 2019.3.1:
 
-# if unity3d was installed to /Application/Unity531
-sudo python setup.py install /Application/Unity531
+```
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using com.tinylabproductions.TLPLib.Data;
+using com.tinylabproductions.TLPLib.Extensions;
+using pzd.lib.exts;
+using UnityEditor;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
+using Debug = UnityEngine.Debug;
+
+namespace Game.code.Editor.hooks {
+  public class StripUselessAttributesBuildHook : IPostBuildPlayerScriptDLLs {
+    public static void strip(IEnumerable<string> dllPaths) {
+      var tool = Path.GetFullPath("Tools/Compilation/useless-attribute-stripper/UselessAttributeStripper.exe");
+      var stripAttributesXml = Path.GetFullPath("Assets/strip-attributes.xml");
+      var logFile = Path.GetFullPath("strip-attributes.log");
+      var fullDllPaths = dllPaths.Select(s => $"-a \"{Path.GetFullPath(s)}\"").mkString(" ");
+      var editorData = EditorApplication.applicationContentsPath;
+      // We need to trim the '\' from the end because otherwise it escapes quotes. 
+      var dependencies = new[] {
+        "Assets/Plugins/quantum", $"{editorData}/Managed", $"{editorData}/Managed/UnityEngine"
+      }.Select(s => $"-d \"{Path.GetFullPath(s).TrimEnd('\\')}\"").mkString(" ");
+      var args = 
+        $"-x \"{stripAttributesXml}\" " +
+        $"-l \"{logFile}\" " +
+        dependencies + " " +
+        fullDllPaths;
+      log($"Stripping: {tool} {args}");
+      strip(tool, args);
+    }
+
+    static void strip(string tool, string args) {
+      // TODO: mac os support
+      try {
+        var p = Process.Start(new ProcessStartInfo(tool, args) {
+          UseShellExecute = false, CreateNoWindow = true,
+          RedirectStandardError = true, RedirectStandardInput = true, RedirectStandardOutput = true
+        });
+        if (p == null) {
+          logErr($"Running '{tool} {args}' failed: process is null");
+        }
+        else
+          using (p) {
+            p.WaitForExit(1.minute().millis);
+            var stdout = p.StandardOutput.ReadToEnd();
+            var maybeStderr = p.StandardError.ReadToEnd().nonEmptyOpt(true);
+
+            log($"Exit code: {p.ExitCode}");
+            log($"STDOUT:\n{stdout}");
+            foreach (var stdErr in maybeStderr) logErr($"STDERR:\n{stdErr}");
+          }
+      }
+      catch (Exception e) {
+        logErr($"Running '{tool} {args}' failed: {e}");
+      }
+    }
+
+    static void log(string s) => Debug.Log($"[{nameof(StripUselessAttributesBuildHook)}] {s}");
+    static void logErr(string s) => Debug.LogError($"[{nameof(StripUselessAttributesBuildHook)}] {s}");
+    
+    public int callbackOrder => 0;
+    public void OnPostBuildPlayerScriptDLLs(BuildReport report) {
+      log(nameof(OnPostBuildPlayerScriptDLLs));
+      var dlls = report.files
+        .Select(f => f.path)
+        .Where(f => f.EndsWithFast(".dll", true) && Path.GetFileName(f) != "System.dll")
+        .ToArray();
+      strip(dlls);
+    }
+  }
+}
 ```
 
-For Windows, run a command as administrator,
-```sh
-# if unity3d was installed to default directory
-setup.py install    
-
-# if unity3d was installed to C:\Program Files\Unity531
-setup.py install "C:\Program Files\Unity531"
-```
-
-After installed, this utility will be running whenever unity3d builds application with IL2CPP.
-
-### Check what's going on
-
-During unity3D builds application it runs a few programs like mono compiler and IL2CPP.
-At this time this tool will be executed and it will write log messages
-to file in intermediate directory. You can find log file at `./Project/Output/Data/Managed/UselessAttributeStripper.txt`.
-(you can see [sample log](./docs/SampleLog.txt))
-
-With log, you can know which attributes were removed from DLLs and the amount of removal.
-```
-- ProcessDll : /builder/GameClient/Temp/StagingArea/Data/Managed/mscorlib.dll
-  - System.Runtime.InteropServices.ComVisibleAttribute : 1311
-  - System.MonoTODOAttribute : 461
-  - System.CLSCompliantAttribute : 374
-  - (trimmed)
-```
-At the end of log, total removal infomation will be written.
-```
-* Summary *
-  - System.Runtime.CompilerServices.CompilerGeneratedAttribute : 5566
-  - System.Diagnostics.DebuggerHiddenAttribute : 4641
-  - System.Runtime.InteropServices.ComVisibleAttribute : 1380
-  - System.Runtime.CompilerServices.ExtensionAttribute : 797
-  - (trimmed)
-```
-
-### Configuration
-
-This tool has default attribute [lists](https://github.com/SaladbowlCreative/Unity3D.UselessAttributeStripper/blob/master/src/UselessAttributeStripper/BuiltinConfiguration.cs) to be removed.
-These were chosen in a conservative attitude to avoid running problem.
-And if you want to remove other attributes, you can specify
-your own attribute lists on Assets/`strip-attribute.xml` file.
-This file looks like
-```xml
-<strip-attribute>
-  <!-- Protobuf.net (precompiler makes app don't need these attributes) -->
-  <type fullname="ProtoBuf.ProtoContractAttribute"/>
-  <type fullname="ProtoBuf.ProtoMemberAttribute"/>
-  <!-- Project-related -->
-  <type fullname="GameCommon.Data.EidCategoryAttribute"/>
-  <type fullname="GameCommon.Data.RefAttribute"/>
-</strip-attribute>
-```
-To let tool detecting list xml, `links.xml` should exist at the same directory.
-(Assets/links.xml for Assets/strip-attribute.xml)
